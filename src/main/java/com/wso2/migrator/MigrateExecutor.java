@@ -1,6 +1,7 @@
 package com.wso2.migrator;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.logging.Logger;
@@ -20,10 +21,10 @@ public class MigrateExecutor {
 
         // Source Environment details
         String srcEnvName = configs.getProperty("SRC.ENV.NAME");
-        String srcEncClientRegistration = configs.getProperty("SRC.ENV.CLIENT.REG.ENDPOINT");
+        String srcEnvClientRegistration = configs.getProperty("SRC.ENV.CLIENT.REG.ENDPOINT");
         String srcEnvAdminEndpoint = configs.getProperty("SRC.APIM.ADMIN.ENDPOINT");
         String srcEnvTokenEndpoint = configs.getProperty("SRC.TOKEN.ENDPOINT");
-        String srcEncPubEndpoint = configs.getProperty("SRC.PUB.ENDPOINT");
+        String srcEnvPubEndpoint = configs.getProperty("SRC.PUB.ENDPOINT");
         String srcDevportalEndpoint = configs.getProperty("SRC.DEVPORTAL.ENDPOINT");
         String srcEnvUserName = configs.getProperty("SRC.USERNAME");
         String srcEnvPassword = configs.getProperty("SRC.PASSWORD");
@@ -39,18 +40,24 @@ public class MigrateExecutor {
         // remove environment
         String rmEnvName = configs.getProperty("RM.ENV.NAME");
 
-        printEnvDetails("Source", srcEnvName, srcEncClientRegistration, srcEnvAdminEndpoint, srcEnvTokenEndpoint,
-                srcEncPubEndpoint, srcDevportalEndpoint);
+        //export format
+        String format = "json";
+
+        //get export Directory Path
+        String workingDirecory = configs.getProperty("WRK.DIRECTORY");
+
+        printEnvDetails("Source", srcEnvName, srcEnvClientRegistration, srcEnvAdminEndpoint, srcEnvTokenEndpoint,
+                srcEnvPubEndpoint, srcDevportalEndpoint, workingDirecory);
         printEnvDetails("Target", tgtEnvName, tgtEncClientRegistration, tgtEnvAdminEndpoint, tgtEnvTokenEndpoint,
-                tgtEncPubEndpoint, tgtDevportalEndpoint);
+                tgtEncPubEndpoint, tgtDevportalEndpoint, workingDirecory);
 
         // remove existing environment
         LOGGER.info("***** Remove Environment *****");
         removeEnv(rmEnvName);
         // Add source environment
         LOGGER.info("***** Adding Source Environment *****");
-        addEnvironment(srcEnvName, srcEncClientRegistration, srcEnvAdminEndpoint, srcEnvTokenEndpoint,
-                srcEncPubEndpoint, srcDevportalEndpoint);
+        addSrcEnvironment(srcEnvName, srcEnvClientRegistration, srcEnvAdminEndpoint, srcEnvTokenEndpoint,
+                srcEnvPubEndpoint, srcDevportalEndpoint);
 
         // Get all added environments
         LOGGER.info("***** Fetching All Added Environments *****");
@@ -61,10 +68,15 @@ public class MigrateExecutor {
         loginSrcEnv(srcEnvName,srcEnvUserName, srcEnvPassword);
 
         //Log out from the source environment
-        LOGGER.info("***** Logout from the source environment *****");
-        logoutSrcEnv(srcEnvName);
+//        LOGGER.info("***** Logout from the source environment *****");
+//        logoutSrcEnv(srcEnvName);
+
+        //Export all APIs
+        LOGGER.info("***** Export all APIs *****");
+        exportAPIs(srcEnvName,format);
     }
-    private static void printEnvDetails(String type, String name, String registration, String admin, String token, String publisher, String devportal) {
+    private static void printEnvDetails(String type, String name, String registration, String admin, String token,
+                                        String publisher, String devportal, String workingDirecory) {
         System.out.println(type + " Environment:");
         System.out.println(" - Name: " + name);
         System.out.println(" - Client Registration: " + registration);
@@ -72,15 +84,24 @@ public class MigrateExecutor {
         System.out.println(" - Token: " + token);
         System.out.println(" - Publisher: " + publisher);
         System.out.println(" - DevPortal: " + devportal);
+        System.out.println(" - Export Directory: " + workingDirecory);
         System.out.println("-----------------------------------------");
     }
-    public static void addEnvironment(String env, String registration, String admin, String token, String publisher,
+    public static void addSrcEnvironment(String env, String registration, String admin, String token, String publisher,
                                       String devportal) {
-        String addEnvcommand = String.format(
+        String addSrcEnvcommand = String.format(
                 "apictl add env %s --registration %s --admin %s --token %s --publisher %s --devportal %s",
                 env, registration, admin, token, publisher, devportal
         );
-        executeCommand(addEnvcommand);
+        executeCommand(addSrcEnvcommand);
+    }
+    public static void addTgtEnvironment(String env, String registration, String admin, String token, String publisher,
+                                         String devportal) {
+        String addTgtEnvcommand = String.format(
+                "apictl add env %s --registration %s --admin %s --token %s --publisher %s --devportal %s",
+                env, registration, admin, token, publisher, devportal
+        );
+        executeCommand(addTgtEnvcommand);
     }
     public static void getAllAddedEnvs() {
         String getEnvCommand = "apictl get envs";
@@ -96,11 +117,51 @@ public class MigrateExecutor {
         System.out.println(loginSrcCommand);
         executeCommand(loginSrcCommand);
     }
-
     public static void logoutSrcEnv(String envname){
         String logoutSrcCommand = String.format("apictl logout -k %s", envname);
         System.out.println(logoutSrcCommand);
         executeCommand(logoutSrcCommand);
+    }
+
+    public static void loginTgtEnv(String envname, String username, String password){
+        String loginSrcCommand = String.format("apictl login -k %s -u %s -p %s", envname, username, password);
+        System.out.println(loginSrcCommand);
+        executeCommand(loginSrcCommand);
+    }
+
+    public static void logoutTgtEnv(String envname){
+        String logoutSrcCommand = String.format("apictl logout -k %s", envname);
+        System.out.println(logoutSrcCommand);
+        executeCommand(logoutSrcCommand);
+    }
+
+    public static void exportAPIs(String envName, String format){
+        String exportAllAPI = String.format("apictl export apis -e %s --format %s --preserve-status --force -k"
+                ,envName, format);
+        System.out.println(exportAllAPI);
+        executeCommand(exportAllAPI);
+    }
+    public static void importAPIs(String directoryPath, String environment) {
+        File directory = new File(directoryPath);
+
+        if (directory.exists() && directory.isDirectory()) {
+            File[] files = directory.listFiles((dir, name) -> name.endsWith(".zip"));
+
+            if (files != null && files.length > 0) {
+                for (File file : files) {
+                    String filePath = file.getAbsolutePath();
+                    importAPI(filePath, environment);
+                }
+            } else {
+                LOGGER.warning("No API ZIP files found in the directory.");
+            }
+        } else {
+            LOGGER.severe("Invalid directory path or directory does not exist.");
+        }
+    }
+    public static void importAPI(String filePath, String environment) {
+        String command = String.format("apictl import api -f \"%s\" -e %s", filePath, environment);
+        executeCommand(command);
     }
 
     private static void executeCommand(String command) {
